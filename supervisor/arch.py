@@ -56,17 +56,33 @@ class CpuArch(CoreSysAttributes):
             return
 
         native_support = self.detect_cpu()
+        _LOGGER.info("Native architecture support: %s", native_support)
 
         # Evaluate current CPU/Platform
-        if not self.sys_machine or self.sys_machine not in arch_data:
+        if not self.sys_machine:
             _LOGGER.warning("Can't detect the machine type!")
             self._default_arch = native_support
             self._supported_arch.append(self.default)
+            self._supported_set = set(self._supported_arch)
             return
-
-        # Use configs from arch.json
-        self._supported_arch.extend(arch_data[self.sys_machine])
-        self._default_arch = self.supported[0]
+        
+        # Special handling for aarch64
+        if native_support == "aarch64" or self.sys_machine == "aarch64":
+            _LOGGER.info("Setting up aarch64 architecture support")
+            self._default_arch = "aarch64"
+            # Add architectures that aarch64 can typically support
+            self._supported_arch = ["aarch64", "armv7", "armhf"]
+            self._supported_set = set(self._supported_arch)
+            return
+        
+        # Normal flow for architectures in arch.json
+        if self.sys_machine in arch_data:
+            self._supported_arch.extend(arch_data[self.sys_machine])
+            self._default_arch = self.supported[0]
+        else:
+            _LOGGER.warning("Machine type %s not found in arch data!", self.sys_machine)
+            self._default_arch = native_support
+            self._supported_arch.append(self.default)
 
         # Make sure native support is in supported list
         if native_support not in self._supported_arch:
@@ -87,8 +103,22 @@ class CpuArch(CoreSysAttributes):
 
     def detect_cpu(self) -> str:
         """Return the arch type of local CPU."""
-        cpu = platform.machine()
-        for check, value in MAP_CPU.items():
-            if cpu.startswith(check):
-                return value
-        return self.sys_supervisor.arch
+        # Get CPU arch
+        cpu_arch = platform.machine().lower()
+        
+        # Make sure we map correctly
+        if cpu_arch in MAP_CPU:
+            return MAP_CPU[cpu_arch]
+        
+        # Handle specific cases
+        if "aarch64" in cpu_arch:
+            return "aarch64"
+        if "arm" in cpu_arch and "v8" in cpu_arch:
+            return "aarch64"
+        if "arm" in cpu_arch and "v7" in cpu_arch:
+            return "armv7"
+        if "arm" in cpu_arch:
+            return "armhf"
+        
+        _LOGGER.warning("Unsupported CPU architecture: %s", cpu_arch)
+        return "amd64"  # Default to amd64 if unknown
